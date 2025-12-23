@@ -1,9 +1,31 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from rug import Rug
+
+def calculate_hma(series, period):
+    half_length = int(period / 2)
+    sqrt_length = int(period**0.5)
+    
+    # Calculate WMA: We need to properly weight the rolling window
+    # pandas rolling().mean() is SMA. rolling().apply() is flexible but slow.
+    # WMA formula: Sum(Price * Weight) / Sum(Weights)
+    
+    def wma(s, length):
+        weights = pd.Series(range(1, length + 1))
+        # Use simple rolling apply with dot product for WMA
+        # Note: 'raw=True' passes numpy array which is faster
+        return s.rolling(window=length).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
+
+    wmaf = wma(series, half_length)
+    wmas = wma(series, period)
+    
+    diff = 2 * wmaf - wmas
+    hma = wma(diff, sqrt_length)
+    return hma
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Stock Dashboard with Rug")
@@ -95,6 +117,12 @@ if st.sidebar.button("Analyze Stock"):
             df['Upper'] = df['SMA'] + (df['STD'] * std_dev)
             df['Lower'] = df['SMA'] - (df['STD'] * std_dev)
 
+            # --- Hull Moving Average (HMA) ---
+            # Using the same window size as Bollinger Bands for consistency, or default to something else?
+            # Typically HMA is faster. Let's use the same 'window' parameter for now or a standard like 9.
+            # Let's use the user-selected window.
+            df['HMA'] = calculate_hma(df['Close'], window)
+
             # --- RSI Calculation ---
             delta = df['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -129,6 +157,7 @@ if st.sidebar.button("Analyze Stock"):
             fig.add_trace(go.Scatter(x=df.index, y=df['Upper'], line=dict(color='rgba(0, 150, 255, 0.3)', width=1), name='Upper BB'), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], line=dict(color='rgba(0, 150, 255, 0.3)', width=1), fill='tonexty', name='Lower BB'), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['SMA'], line=dict(color='orange', width=1.5), name='SMA'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['HMA'], line=dict(color='yellow', width=1.5, dash='dot'), name='HMA'), row=1, col=1)
 
             # --- Row 2: RSI ---
             fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='purple', width=2), name='RSI'), row=2, col=1)
@@ -145,7 +174,8 @@ if st.sidebar.button("Analyze Stock"):
                 height=900, 
                 xaxis_rangeslider_visible=False, # Disable default candlestick slider (conflicts with subplots sometimes)
                 template="plotly_dark",
-                showlegend=False # Optional: hide legend to save space, or keep it
+                showlegend=True, # Show legends
+                legend=dict(x=0, y=1, orientation="h") # Position legend at top left, horizontal
             )
             
             # Enable Range Slider on the bottom plot (Volume) to control all x-axes
