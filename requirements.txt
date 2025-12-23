@@ -2,5 +2,5 @@ streamlit
 pandas
 yfinance
 plotly
-rug-stock
+rug
 numpy
